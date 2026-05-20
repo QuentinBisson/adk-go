@@ -22,7 +22,6 @@ import (
 	"time"
 
 	legacyA2A "github.com/a2aproject/a2a-go/a2a"
-	"github.com/a2aproject/a2a-go/a2aclient"
 	legacyAClient "github.com/a2aproject/a2a-go/a2aclient"
 	legacyASrv "github.com/a2aproject/a2a-go/a2asrv"
 	v2a2a "github.com/a2aproject/a2a-go/v2/a2a"
@@ -331,7 +330,7 @@ func TestCompat_RemoteTaskCleanupCallback(t *testing.T) {
 	oldAgent := utils.Must(NewA2A(A2AConfig{
 		Name:      "remote-agent",
 		AgentCard: card,
-		RemoteTaskCleanupCallback: func(ctx context.Context, card *legacyA2A.AgentCard, client *a2aclient.Client, taskInfo legacyA2A.TaskInfo, cause error) {
+		RemoteTaskCleanupCallback: func(ctx context.Context, card *legacyA2A.AgentCard, client *legacyAClient.Client, taskInfo legacyA2A.TaskInfo, cause error) {
 			cleanupCalled = true
 			cleanupTaskInfo = taskInfo
 		},
