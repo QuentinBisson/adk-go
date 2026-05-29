@@ -58,16 +58,11 @@ func NewStreamingResponseAggregator() *streamingResponseAggregator {
 // also yielding an aggregated response if the GenerateContentResponse has zero parts or is audio data
 func (s *streamingResponseAggregator) ProcessResponse(ctx context.Context, genResp *genai.GenerateContentResponse) iter.Seq2[*model.LLMResponse, error] {
 	return func(yield func(*model.LLMResponse, error) bool) {
-		if len(genResp.Candidates) == 0 {
-			// Vertex AI occasionally emits leading SSE chunks that contain only
-			// response metadata (createTime, modelVersion, usageMetadata, etc.)
-			// but no Candidates. These are valid and should be skipped; the actual
-			// content arrives in subsequent chunks.
-			return
-		}
-		candidate := genResp.Candidates[0]
 		resp := converters.Genai2LLMResponse(genResp)
-		resp.TurnComplete = candidate.FinishReason != ""
+		if len(genResp.Candidates) > 0 {
+			candidate := genResp.Candidates[0]
+			resp.TurnComplete = candidate.FinishReason != ""
+		}
 		// Aggregate the response and check if an intermediate event to yield was created
 		if aggrResp := s.aggregateResponse(resp); aggrResp != nil {
 			if !yield(aggrResp, nil) {
