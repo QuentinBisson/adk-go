@@ -1007,7 +1007,8 @@ func TestMetadataVertexAISSEStream(t *testing.T) {
 
 	emptyTextChunk := &genai.GenerateContentResponse{
 		Candidates: []*genai.Candidate{
-			{Content: genai.NewContentFromText("", "model")}},
+			{Content: genai.NewContentFromText("", "model")},
+		},
 		UsageMetadata: &genai.GenerateContentResponseUsageMetadata{},
 	}
 
