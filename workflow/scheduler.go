@@ -445,8 +445,26 @@ func runNode(
 			completion.err = err
 			return
 		}
+		// Fold any State().Set writes accumulated since the last
+		// yield onto this event so the consumer sees them in
+		// emission order. Skipped silently when ev is nil or the
+		// node context is not a *nodeContext (e.g. tests that
+		// inject a raw InvocationContext).
+		flushPendingStateOnto(ctx, ev)
 		select {
 		case out <- eventItem{nodeName: name, ev: ev}:
+		case <-ctx.Done():
+			completion.err = ctx.Err()
+			return
+		}
+	}
+	// Flush any State().Set writes that happened after the final
+	// yield (or with no yield at all) as a synthetic trailing event
+	// so the consumer can merge them into the session before
+	// scheduling successors. No-op when there is nothing pending.
+	if flushEv := synthesizePendingStateEvent(ctx, name); flushEv != nil {
+		select {
+		case out <- eventItem{nodeName: name, ev: flushEv}:
 		case <-ctx.Done():
 			completion.err = ctx.Err()
 			return
@@ -590,6 +608,12 @@ func (s *scheduler) handleEvent(it eventItem) {
 		nr.setInputRequest(it.ev.RequestedInput, it.nodeName)
 	}
 	if isDescendant {
+		// Even for descendant (dynamic-child) events we want
+		// state writes to propagate to the shared session so
+		// subsequent activations (including the parent's
+		// successors) see them. Output/Routes stay scoped to
+		// the child.
+		mergeStateDeltaIntoSession(s.parentCtx.Session(), it.ev)
 		return
 	}
 	if it.ev.Routes != nil {
@@ -604,6 +628,15 @@ func (s *scheduler) handleEvent(it eventItem) {
 		it.ev.Output = validated
 		nr.setOutput(validated, it.nodeName)
 	}
+	// Merge state writes into the session so downstream nodes
+	// scheduled by handleCompletion observe them via
+	// ctx.Session().State().Get. Done after Output validation so a
+	// failing node does not poison the session with a partial
+	// write — but note: even on the failure path the merge above
+	// already ran for descendants. This mirrors the runner-driven
+	// merge in SessionService.AppendEvent and is idempotent with
+	// it when both are in the loop.
+	mergeStateDeltaIntoSession(s.parentCtx.Session(), it.ev)
 }
 
 // validateNodeOutput invokes ValidateOutput on the node identified by

@@ -103,6 +103,9 @@ func (s *dynamicSubScheduler) runNode(child Node, input any, opts runNodeOptions
 		if ev.NodeInfo == nil {
 			ev.NodeInfo = &session.NodeInfo{Path: childPath}
 		}
+		// Fold the child's State().Set writes onto this event
+		// before forwarding upstream.
+		flushPendingStateOnto(childCtx, ev)
 		if ev.RequestedInput != nil {
 			interrupted = true
 		}
@@ -110,6 +113,21 @@ func (s *dynamicSubScheduler) runNode(child Node, input any, opts runNodeOptions
 			out = ev.Output
 		}
 		if err := s.emitUp(ev); err != nil {
+			return nil, &NodeRunError{
+				ChildName: name, ChildPath: childPath, RunID: runID,
+				Cause: fmt.Errorf("%w: emitUp: %v", ErrNodeFailed, err),
+			}
+		}
+	}
+
+	// Emit any writes the child made after its last yield (or with
+	// no yield at all) so the parent and session see them before
+	// the orchestrator continues.
+	if flushEv := synthesizePendingStateEvent(childCtx, name); flushEv != nil {
+		if flushEv.NodeInfo == nil {
+			flushEv.NodeInfo = &session.NodeInfo{Path: childPath}
+		}
+		if err := s.emitUp(flushEv); err != nil {
 			return nil, &NodeRunError{
 				ChildName: name, ChildPath: childPath, RunID: runID,
 				Cause: fmt.Errorf("%w: emitUp: %v", ErrNodeFailed, err),
