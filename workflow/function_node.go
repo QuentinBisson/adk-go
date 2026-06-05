@@ -84,13 +84,9 @@ func newFunctionNodeWithResolvedSchemas[IN, OUT any](name string, fn func(ctx ag
 			return output, err
 		}
 
-		if outputSchema != nil {
-			validateErr := outputSchema.Validate(output)
-			if validateErr != nil {
-				return nil, fmt.Errorf("function node %s: validation failed for output %T: %w", name, new(OUT), validateErr)
-			}
-		}
-
+		// Output validation is performed scheduler-side via
+		// BaseNode.ValidateOutput; outputSchema still flows through
+		// BaseNode below so the scheduler can enforce it.
 		return output, nil
 	}
 
