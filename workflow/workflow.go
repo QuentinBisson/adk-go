@@ -245,7 +245,7 @@ func (w *Workflow) Run(ctx agent.InvocationContext) iter.Seq2[*session.Event, er
 // This is used by WorkflowNode to run nested workflows.
 func (w *Workflow) RunNode(ctx agent.InvocationContext, input any) iter.Seq2[*session.Event, error] {
 	return func(yield func(*session.Event, error) bool) {
-		s := newScheduler(ctx, w.graph, w.maxConcurrency)
+		s := newScheduler(ctx, w.graph, w.maxConcurrency, w.name)
 		// Seed: schedule START with the supplied input.
 		startState := s.state.EnsureNode(Start.Name())
 		startState.Input = input
