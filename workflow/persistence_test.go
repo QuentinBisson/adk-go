@@ -37,9 +37,8 @@ func (e sliceEvents) All() iter.Seq[*session.Event] {
 	}
 }
 
-// TestCollectNodeOutputs_OutputWithNilNodeInfo guards that an output
-// event with a nil NodeInfo (a non-workflow output event) is attributed
-// via Author without dereferencing NodeInfo.OutputFor and panicking.
+// TestCollectNodeOutputs_OutputWithNilNodeInfo: an output event with nil
+// NodeInfo is attributed via Author, without panicking on OutputFor.
 func TestCollectNodeOutputs_OutputWithNilNodeInfo(t *testing.T) {
 	nodesByName := map[string]Node{"nodeA": &dummyNode{name: "nodeA"}}
 
@@ -57,15 +56,11 @@ func TestCollectNodeOutputs_OutputWithNilNodeInfo(t *testing.T) {
 	}
 }
 
-// TestCollectNodeOutputs_DelegatedOutputRecoveredByStaticOwner mirrors a
-// real runtime delegation event: an orchestrator static node "orch"
-// delegates its output down a single-rooted dynamic chain via
-// WithUseAsOutput. The runtime emits exactly one event whose Path and
-// every OutputFor entry share the same root segment ("orch"), because a
-// child path is always its parent path plus a suffix
-// (dynamic_scheduler.go: childPath = parentPath + "/" + name + "@" +
-// runID). On resume, "orch" recovers its output from that single event.
-func TestCollectNodeOutputs_DelegatedOutputRecoveredByStaticOwner(t *testing.T) {
+// TestCollectNodeOutputs_DelegatedOutputRecoveredByStaticNode: a real
+// delegation event is single-rooted (childPath = parentPath + suffix), so
+// Path and every OutputFor entry share one root segment ("orch"). On
+// resume "orch" recovers its output from that single event.
+func TestCollectNodeOutputs_DelegatedOutputRecoveredByStaticNode(t *testing.T) {
 	nodesByName := map[string]Node{"orch": &dummyNode{name: "orch"}}
 
 	events := sliceEvents{
@@ -86,18 +81,12 @@ func TestCollectNodeOutputs_DelegatedOutputRecoveredByStaticOwner(t *testing.T) 
 	}
 }
 
-// TestCollectNodeOutputs_OutputForAttributesForeignStaticOwner exercises
-// the forward-looking branch in collectNodeOutputs that attributes a
-// delegated output to a static node whose name does NOT match the
-// emitting event's own static owner.
-//
-// The current runtime cannot produce such an event: delegation only
-// flows up a single-rooted chain, so every OutputFor entry shares the
-// emitting event's root segment (see
-// TestCollectNodeOutputs_DelegatedOutputRecoveredByStaticOwner). This
-// test hand-builds the cross-owner case to lock in the behavior in case
-// a future mechanism delegates output to a foreign static node.
-func TestCollectNodeOutputs_OutputForAttributesForeignStaticOwner(t *testing.T) {
+// TestCollectNodeOutputs_OutputForAttributesForeignStaticNode exercises
+// the forward-looking branch that attributes a delegated output to a
+// static node differing from the event's own. The current runtime never
+// emits this (delegation is single-rooted), so the event is hand-built to
+// lock in the behavior should foreign-node delegation ever be added.
+func TestCollectNodeOutputs_OutputForAttributesForeignStaticNode(t *testing.T) {
 	nodesByName := map[string]Node{
 		"emitter": &dummyNode{name: "emitter"},
 		"foreign": &dummyNode{name: "foreign"},
@@ -120,6 +109,6 @@ func TestCollectNodeOutputs_OutputForAttributesForeignStaticOwner(t *testing.T) 
 		t.Errorf("outputs[emitter] = %v, want %v", got, want)
 	}
 	if got, want := outputs["foreign"], "delegated"; got != want {
-		t.Errorf("outputs[foreign] = %v, want %v (OutputFor did not attribute to foreign static owner)", got, want)
+		t.Errorf("outputs[foreign] = %v, want %v (OutputFor did not attribute to foreign static node)", got, want)
 	}
 }
