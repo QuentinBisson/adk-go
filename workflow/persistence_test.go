@@ -57,33 +57,69 @@ func TestCollectNodeOutputs_OutputWithNilNodeInfo(t *testing.T) {
 	}
 }
 
-// TestCollectNodeOutputs_DelegatedOutputAttributedToAncestors verifies a
-// single delegated event (WithUseAsOutput) recovers output for the static
-// owners of every path in OutputFor, so delegating ancestors resume
-// without a re-emitted event.
-func TestCollectNodeOutputs_DelegatedOutputAttributedToAncestors(t *testing.T) {
-	nodesByName := map[string]Node{
-		"parent": &dummyNode{name: "parent"},
-		"child":  &dummyNode{name: "child"},
-	}
+// TestCollectNodeOutputs_DelegatedOutputRecoveredByStaticOwner mirrors a
+// real runtime delegation event: an orchestrator static node "orch"
+// delegates its output down a single-rooted dynamic chain via
+// WithUseAsOutput. The runtime emits exactly one event whose Path and
+// every OutputFor entry share the same root segment ("orch"), because a
+// child path is always its parent path plus a suffix
+// (dynamic_scheduler.go: childPath = parentPath + "/" + name + "@" +
+// runID). On resume, "orch" recovers its output from that single event.
+func TestCollectNodeOutputs_DelegatedOutputRecoveredByStaticOwner(t *testing.T) {
+	nodesByName := map[string]Node{"orch": &dummyNode{name: "orch"}}
 
 	events := sliceEvents{
 		{
-			Author: "child",
+			Author: "orch",
 			Output: "delegated",
 			NodeInfo: &session.NodeInfo{
-				Path:      "child/grandchild@1",
-				OutputFor: []string{"child/grandchild@1", "parent/child@1"},
+				Path:      "orch/middle@1/inner@1",
+				OutputFor: []string{"orch/middle@1/inner@1", "orch/middle@1", "orch"},
 			},
 		},
 	}
 
 	outputs, _ := collectNodeOutputs(events, nodesByName)
 
-	if got, want := outputs["child"], "delegated"; got != want {
-		t.Errorf("outputs[child] = %v, want %v", got, want)
+	if got, want := outputs["orch"], "delegated"; got != want {
+		t.Errorf("outputs[orch] = %v, want %v", got, want)
 	}
-	if got, want := outputs["parent"], "delegated"; got != want {
-		t.Errorf("outputs[parent] = %v, want %v (delegated output not attributed to ancestor)", got, want)
+}
+
+// TestCollectNodeOutputs_OutputForAttributesForeignStaticOwner exercises
+// the forward-looking branch in collectNodeOutputs that attributes a
+// delegated output to a static node whose name does NOT match the
+// emitting event's own static owner.
+//
+// The current runtime cannot produce such an event: delegation only
+// flows up a single-rooted chain, so every OutputFor entry shares the
+// emitting event's root segment (see
+// TestCollectNodeOutputs_DelegatedOutputRecoveredByStaticOwner). This
+// test hand-builds the cross-owner case to lock in the behavior in case
+// a future mechanism delegates output to a foreign static node.
+func TestCollectNodeOutputs_OutputForAttributesForeignStaticOwner(t *testing.T) {
+	nodesByName := map[string]Node{
+		"emitter": &dummyNode{name: "emitter"},
+		"foreign": &dummyNode{name: "foreign"},
+	}
+
+	events := sliceEvents{
+		{
+			Author: "emitter",
+			Output: "delegated",
+			NodeInfo: &session.NodeInfo{
+				Path:      "emitter/child@1",
+				OutputFor: []string{"emitter/child@1", "foreign/child@1"},
+			},
+		},
+	}
+
+	outputs, _ := collectNodeOutputs(events, nodesByName)
+
+	if got, want := outputs["emitter"], "delegated"; got != want {
+		t.Errorf("outputs[emitter] = %v, want %v", got, want)
+	}
+	if got, want := outputs["foreign"], "delegated"; got != want {
+		t.Errorf("outputs[foreign] = %v, want %v (OutputFor did not attribute to foreign static owner)", got, want)
 	}
 }
