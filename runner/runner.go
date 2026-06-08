@@ -65,13 +65,23 @@ type PluginConfig struct {
 type RunOption func(*runOptions)
 
 type runOptions struct {
-	stateDelta map[string]any
+	stateDelta       map[string]any
+	yieldUserMessage bool
 }
 
 // WithStateDelta sets a state delta for the run invocation.
 func WithStateDelta(delta map[string]any) RunOption {
 	return func(o *runOptions) {
 		o.stateDelta = delta
+	}
+}
+
+// WithYieldUserMessage makes Run yield the user message event (after it is
+// appended to the session) before any agent/node events. Mirrors
+// adk-python's yield_user_message. Currently honored by the node path.
+func WithYieldUserMessage() RunOption {
+	return func(o *runOptions) {
+		o.yieldUserMessage = true
 	}
 }
 
@@ -167,9 +177,58 @@ func (r *Runner) Run(ctx context.Context, userID, sessionID string, msg *genai.C
 			return
 		}
 
-		agentToRun, err := r.findAgentToRun(storedSession, msg)
-		if err != nil {
-			yield(nil, err)
+		// Node path: an LlmAgent runs through the ADK 2.0 node runtime
+		// (the Go equivalent of adk-python's _run_node_async, reached for
+		// an LlmAgent root).
+
+		if isLlmAgent(r.rootAgent) {
+			llmInternalAgent, ok := r.rootAgent.(llminternal.Agent)
+			if !ok {
+				yield(nil, fmt.Errorf("agent %s is not an LlmAgent", r.rootAgent.Name()))
+				return
+			}
+
+			llmInternalState := llminternal.Reveal(llmInternalAgent)
+
+			if llmInternalState.Mode == "" {
+				// LlmAgent as root agent must have chat mode.
+				llmInternalState.Mode = llminternal.ModeChat
+			}
+
+			if llmInternalState.Mode != llminternal.ModeChat {
+				yield(nil, fmt.Errorf("root agent %s must be a chat LlmAgent, but has mode %s", r.rootAgent.Name(), llmInternalState.Mode))
+				return
+			}
+
+			hasTaskSubAgent := func() bool {
+				for _, subAgent := range r.rootAgent.SubAgents() {
+					if !isLlmAgent(subAgent) {
+						continue
+					}
+					llmInternalSubAgent := llminternal.Reveal(subAgent.(llminternal.Agent))
+					if llmInternalSubAgent.Mode == llminternal.ModeTask {
+						return true
+					}
+				}
+				return false
+			}
+
+			var agentToRun agent.Agent
+
+			// when the chat coordinator has task-mode sub-agents,
+			// the wrapper handles delegation via ctx.run_node. Don't let
+			// the legacy sub-agent picker bypass the coordinator on resume.
+			if hasTaskSubAgent() {
+				agentToRun = r.rootAgent
+			} else {
+				agentToRun, err = r.findAgentToRun(storedSession, msg)
+				if err != nil {
+					yield(nil, err)
+					return
+				}
+			}
+
+			r.runNode(ctx, storedSession, agentToRun, msg, cfg, options, yield)
 			return
 		}
 
@@ -203,11 +262,11 @@ func (r *Runner) Run(ctx context.Context, userID, sessionID string, msg *genai.C
 			Artifacts:   artifacts,
 			Memory:      memoryImpl,
 			Session:     storedSession,
-			Agent:       agentToRun,
+			Agent:       r.rootAgent,
 			UserContent: msg,
 			RunConfig:   &cfg,
 		})
-		ctx, err = r.appendMessageToSession(ctx, storedSession, msg, cfg.SaveInputBlobsAsArtifacts, r.pluginManager, options.stateDelta)
+		ctx, _, err = r.appendMessageToSession(ctx, storedSession, msg, cfg.SaveInputBlobsAsArtifacts, r.pluginManager, options.stateDelta)
 		if err != nil {
 			yield(nil, err)
 			return
@@ -235,7 +294,7 @@ func (r *Runner) Run(ctx context.Context, userID, sessionID string, msg *genai.C
 			}
 		}
 
-		for event, err := range agentToRun.Run(ctx) {
+		for event, err := range r.rootAgent.Run(ctx) {
 			if err != nil {
 				if !yield(event, err) {
 					return
@@ -516,14 +575,14 @@ func (r *Runner) RunLive(ctx context.Context, userID, sessionID string, cfg agen
 	}, wrappedIter, nil
 }
 
-func (r *Runner) appendMessageToSession(ctx agent.InvocationContext, storedSession session.Session, msg *genai.Content, saveInputBlobsAsArtifacts bool, pluginManager *plugininternal.PluginManager, stateDelta map[string]any) (agent.InvocationContext, error) {
+func (r *Runner) appendMessageToSession(ctx agent.InvocationContext, storedSession session.Session, msg *genai.Content, saveInputBlobsAsArtifacts bool, pluginManager *plugininternal.PluginManager, stateDelta map[string]any) (agent.InvocationContext, *session.Event, error) {
 	if msg == nil {
-		return ctx, nil
+		return ctx, nil, nil
 	}
 	if pluginManager != nil {
 		modifiedMsg, err := pluginManager.RunOnUserMessageCallback(ctx, msg)
 		if err != nil {
-			return ctx, fmt.Errorf("error running on run user message callback : %w", err)
+			return ctx, nil, fmt.Errorf("error running on run user message callback : %w", err)
 		}
 		if modifiedMsg != nil {
 			msg = modifiedMsg
@@ -548,7 +607,7 @@ func (r *Runner) appendMessageToSession(ctx agent.InvocationContext, storedSessi
 			}
 			fileName := fmt.Sprintf("artifact_%s_%d", ctx.InvocationID(), i)
 			if _, err := artifactsService.Save(ctx, fileName, part); err != nil {
-				return ctx, fmt.Errorf("failed to save artifact %s: %w", fileName, err)
+				return ctx, nil, fmt.Errorf("failed to save artifact %s: %w", fileName, err)
 			}
 			// Replace the part with a text placeholder
 			msg.Parts[i] = &genai.Part{
@@ -568,9 +627,9 @@ func (r *Runner) appendMessageToSession(ctx agent.InvocationContext, storedSessi
 	}
 
 	if err := r.sessionService.AppendEvent(ctx, storedSession, event); err != nil {
-		return ctx, fmt.Errorf("failed to append event to sessionService: %w", err)
+		return ctx, nil, fmt.Errorf("failed to append event to sessionService: %w", err)
 	}
-	return ctx, nil
+	return ctx, event, nil
 }
 
 // findAgentToRun returns the agent that should handle the next request based on
