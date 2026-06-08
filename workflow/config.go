@@ -65,11 +65,14 @@ type NodeConfig struct {
 	// the engine. The engine currently treats nil as handoff.
 	RerunOnResume *bool
 
-	// WaitForOutput, when true, keeps the node in NodeWaiting
-	// (re-triggerable) until it actually yields an event carrying an
-	// "output" key in Actions.StateDelta, instead of moving it to
-	// NodeCompleted on first return. JoinNode and any custom fan-in
-	// node sets this. nil means "use the engine default" — false for
+	// WaitForOutput, when true, parks the parent (ErrNodeInterrupted)
+	// to re-run instead of completing it, when a child dispatched via
+	// RunNode finishes without yielding an event whose Output is set.
+	// This lets a multi-turn child (e.g. a task-mode LlmAgent that has
+	// not yet produced its final answer) be retried rather than falsely
+	// completed with the zero value. Currently honored only on the
+	// RunNode (dynamic sub-scheduler) path; the static scheduler does
+	// not yet read it. nil means "use the engine default" — false for
 	// most node kinds.
 	WaitForOutput *bool
 

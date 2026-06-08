@@ -324,6 +324,7 @@ func (s *dynamicSubScheduler) runNode(child Node, input any, opts runNodeOptions
 
 	var (
 		out         any
+		hasOutput   bool
 		interrupted bool
 	)
 	for ev, evErr := range child.Run(childCtx, input) {
@@ -366,6 +367,7 @@ func (s *dynamicSubScheduler) runNode(child Node, input any, opts runNodeOptions
 				}
 			}
 			out = validated
+			hasOutput = true
 			// Stamp OutputFor so resume can attribute the output: the
 			// emitter's own path plus, under delegation, this parent and
 			// its ancestors (the parent then suppresses its own terminal
@@ -388,18 +390,43 @@ func (s *dynamicSubScheduler) runNode(child Node, input any, opts runNodeOptions
 		}
 	}
 
+	// HITL: not cached, so resume re-runs and re-invokes RunNode.
 	if interrupted {
-		// HITL is not terminal — parent re-runs on resume and is
-		// expected to re-invoke RunNode. Do not cache.
-		return nil, &NodeRunError{
-			ChildName: name, ChildPath: childPath, RunID: runID,
-			Cause: ErrNodeInterrupted,
-		}
+		return nil, s.pause(name, childPath, runID)
+	}
+
+	// A child whose WaitForOutput is set but that finished without an
+	// output is not done yet; pause so the parent re-runs and re-invokes
+	// RunNode. WaitForOutput mirrors adk-python's wait_for_output node
+	// field. This achieves the same effect as adk-python calling
+	// run_node(raise_on_wait=True), but unconditionally rather than via a
+	// per-call flag — adk-go has no raise_on_wait equivalent yet (safe
+	// today: dispatchTaskFC is the only RunNode caller; see
+	// followups/raise-on-wait-parity.md).
+	if !hasOutput && waitsForOutput(child) {
+		return nil, s.pause(name, childPath, runID)
 	}
 
 	s.storeCachedOutput(childPath, out)
 	s.commitDelegation(childPath, out) // no-op unless this child claimed the delegation
 	return out, nil
+}
+
+// pause reports that a child did not finish this turn so the parent must
+// re-run later. ErrNodeInterrupted is a control sentinel (not a failure),
+// swallowed by dynamicNode.Run.
+func (s *dynamicSubScheduler) pause(name, childPath, runID string) error {
+	return &NodeRunError{
+		ChildName: name, ChildPath: childPath, RunID: runID,
+		Cause: ErrNodeInterrupted,
+	}
+}
+
+// waitsForOutput reports whether node opts into WaitForOutput (tri-state
+// pointer; nil means the engine default of false).
+func waitsForOutput(node Node) bool {
+	w := node.Config().WaitForOutput
+	return w != nil && *w
 }
 
 func (s *dynamicSubScheduler) lookupCachedOutput(childPath string) (any, bool) {
