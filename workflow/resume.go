@@ -166,8 +166,7 @@ func (w *Workflow) Resume(
 				scheduled++
 			} else {
 				// Handoff: the response is the asker's output for its
-				// successors; the asker does not re-run. Counted in
-				// Pass 2 only if a successor is actually scheduled.
+				// successors; the asker does not re-run.
 				out := ns.Output
 				if len(freshMatched) > 0 {
 					out = resumeOutput(freshMatched)
@@ -178,6 +177,17 @@ func (w *Workflow) Resume(
 				deferredHandoffs = append(deferredHandoffs, deferredHandoff{
 					node: node, resp: out,
 				})
+				// A matched asker is itself an effective resume even
+				// when terminal (no successors to count in Pass 2):
+				// without this a single-asker workflow would wrongly
+				// report ErrNothingToResume. answeredThisTurn gates on
+				// the response being new this turn (rehydration sets it
+				// from resolvedCount), so a duplicate resume stays a
+				// no-op. freshMatched covers the runner-direct path
+				// where the response is not yet in history.
+				if ns.answeredThisTurn || len(freshMatched) > 0 {
+					scheduled++
+				}
 			}
 		}
 

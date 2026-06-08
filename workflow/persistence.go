@@ -34,6 +34,12 @@ type nodeScanState struct {
 	seen       map[string]struct{}
 	// resolved maps an interrupt ID to the (last) user response.
 	resolved map[string]any
+	// resolvedCount maps an interrupt ID to how many user
+	// FunctionResponse events in history resolved it. 1 means the
+	// response arrived this turn for the first time; >1 means a
+	// duplicate resume replayed an already-consumed response. Lets
+	// Resume tell a genuine first resume from an idempotent no-op.
+	resolvedCount map[string]int
 	// schemas maps an interrupt ID to its declared response schema,
 	// re-extracted from the pause FunctionCall args.
 	schemas map[string]*jsonschema.Schema
@@ -111,7 +117,7 @@ func scanHistory(events session.Events, nodesByName map[string]Node) map[string]
 	scanFor := func(name string) *nodeScanState {
 		s := scans[name]
 		if s == nil {
-			s = &nodeScanState{resolved: map[string]any{}, schemas: map[string]*jsonschema.Schema{}}
+			s = &nodeScanState{resolved: map[string]any{}, resolvedCount: map[string]int{}, schemas: map[string]*jsonschema.Schema{}}
 			scans[name] = s
 		}
 		return s
@@ -138,7 +144,9 @@ func scanHistory(events session.Events, nodesByName map[string]Node) map[string]
 				if !ok {
 					continue
 				}
-				scanFor(owner).resolved[fr.ID] = unwrapResponse(fr.Response)
+				sf := scanFor(owner)
+				sf.resolved[fr.ID] = unwrapResponse(fr.Response)
+				sf.resolvedCount[fr.ID]++
 			}
 			continue
 		}
@@ -309,6 +317,15 @@ func (w *Workflow) inferNodeState(node Node, scan *nodeScanState, nodeOutputs ma
 		ns.Status = NodeCompleted
 		ns.Output = resumeOutput(resumed)
 		ns.ResumedInputs = resumed
+		// A response seen for the first time this turn (count == 1)
+		// marks a genuine first resume; a duplicate turn replays an
+		// already-counted response (>= 2) and must stay a no-op.
+		for id := range resumed {
+			if scan.resolvedCount[id] == 1 {
+				ns.answeredThisTurn = true
+				break
+			}
+		}
 	}
 	return ns, nil
 }
