@@ -12,23 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// hitl_simple is the minimal end-to-end HITL workflow for
-// verifying the console launcher's pause/resume support.
-// No LLM, no API key, no streaming — just two workflow nodes:
+// hitl_rerun shows the re-entry HITL pattern: a single emitting
+// FunctionNode both pauses for input and produces the final output.
+// Unlike hitl_simple (two nodes, handoff resume), here one node is
+// re-run from scratch on resume (NodeConfig.RerunOnResume = &true),
+// so the same body has two branches:
 //
-//	Start → ask_name → greet
+//   - first pass: emit a RequestInput and return ErrNodeInterrupted
+//     (pause, no output);
+//   - after resume: read the reply via NodeContext.ResumedInput and
+//     return the greeting as the terminal output.
 //
-// The ask_name node emits a RequestInput that pauses the
-// workflow. The console launcher renders the prompt; the user's
-// reply is delivered to greet as its input.
+// This is where ErrNodeInterrupted matters: the pause branch must end
+// without an output, while the resume branch returns one.
 //
-//	go run ./examples/workflow/hitl_simple/ console
+//	go run ./examples/workflow/hitl_rerun/ console
 //
 //	User -> hello
 //	Agent -> What's your name?
 //	User -> Alice
 //	Agent -> Hello, Alice!
-//	User ->
 package main
 
 import (
@@ -48,8 +51,21 @@ import (
 func main() {
 	ctx := context.Background()
 
-	ask := workflow.NewEmittingFunctionNode[any, any]("ask_name",
+	rerun := true
+	greet := workflow.NewEmittingFunctionNode[any, any]("greet",
 		func(nc workflow.NodeContext, _ any, emit func(*session.Event) error) (any, error) {
+			// Resume branch: the node was re-run after the human
+			// replied, so the answer is available here.
+			if reply, ok := nc.ResumedInput("ask_name"); ok {
+				name, _ := reply.(string)
+				if name == "" {
+					name = "stranger"
+				}
+				return fmt.Sprintf("Hello, %s!", name), nil
+			}
+
+			// First pass: ask and pause. ErrNodeInterrupted ends the
+			// activation without a terminal output.
 			if err := emit(workflow.NewRequestInputEvent(nc, session.RequestInput{
 				InterruptID: "ask_name",
 				Message:     "What's your name?",
@@ -58,32 +74,19 @@ func main() {
 			}
 			return nil, workflow.ErrNodeInterrupted
 		},
-		workflow.NodeConfig{},
-	)
-
-	// greet receives the user's reply (a string) and returns the
-	// greeting. The classic NewFunctionNode is enough — no events
-	// to emit beyond the terminal output.
-	greet := workflow.NewFunctionNode("greet",
-		func(_ agent.InvocationContext, name string) (string, error) {
-			if name == "" {
-				name = "stranger"
-			}
-			return fmt.Sprintf("Hello, %s!", name), nil
-		},
-		workflow.NodeConfig{},
+		workflow.NodeConfig{RerunOnResume: &rerun},
 	)
 
 	rootAgent, err := workflowagent.New(workflowagent.Config{
-		Name:        "hitl_simple",
-		Description: "minimal HITL workflow for console launcher verification",
-		Edges:       workflow.Chain(workflow.Start, ask, greet),
+		Name:        "hitl_rerun",
+		Description: "single-node re-entry HITL workflow",
+		Edges:       workflow.Chain(workflow.Start, greet),
 	})
 	if err != nil {
 		log.Fatalf("failed to create workflow agent: %v", err)
 	}
 
-	log.Printf("hitl_simple sample ready — type anything to start, then answer the prompt")
+	log.Printf("hitl_rerun sample ready — type anything to start, then answer the prompt")
 
 	launcherCfg := &launcher.Config{
 		AgentLoader: agent.NewSingleLoader(rootAgent),
