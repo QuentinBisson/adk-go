@@ -36,7 +36,7 @@ import (
 
 // rollDie ignores the user message; the random number is what
 // drives the routing.
-func rollDie(_ agent.InvocationContext, _ string) (int, error) {
+func rollDie(_ agent.Context, _ string) (int, error) {
 	return rand.IntN(10) + 1, nil
 }
 
@@ -58,15 +58,15 @@ func routeByValue(nc workflow.NodeContext, value int, emit func(*session.Event) 
 	return nil, nil
 }
 
-func handleLow(_ agent.InvocationContext, value int) (string, error) {
+func handleLow(_ agent.Context, value int) (string, error) {
 	return fmt.Sprintf("rolled %d — handling LOW range (1..3)", value), nil
 }
 
-func handleMid(_ agent.InvocationContext, value int) (string, error) {
+func handleMid(_ agent.Context, value int) (string, error) {
 	return fmt.Sprintf("rolled %d — handling MID range (4..7)", value), nil
 }
 
-func handleHigh(_ agent.InvocationContext, value int) (string, error) {
+func handleHigh(_ agent.Context, value int) (string, error) {
 	return fmt.Sprintf("rolled %d — handling HIGH range (8..10)", value), nil
 }
 

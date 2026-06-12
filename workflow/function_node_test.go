@@ -44,7 +44,7 @@ func TestNewFunctionNodeWithSchema(t *testing.T) {
 	tests := []struct {
 		name         string
 		nodeName     string
-		fn           func(ctx agent.InvocationContext, input Input) (map[string]any, error)
+		fn           func(ctx agent.Context, input Input) (map[string]any, error)
 		inputSchema  *jsonschema.Schema
 		outputSchema *jsonschema.Schema
 		input        any
@@ -55,7 +55,7 @@ func TestNewFunctionNodeWithSchema(t *testing.T) {
 		{
 			name:     "Success",
 			nodeName: "upper",
-			fn: func(ctx agent.InvocationContext, input Input) (map[string]any, error) {
+			fn: func(ctx agent.Context, input Input) (map[string]any, error) {
 				return map[string]any{"result": strings.ToUpper(input.Value)}, nil
 			},
 			inputSchema:  mustSchema[Input](t),
@@ -67,7 +67,7 @@ func TestNewFunctionNodeWithSchema(t *testing.T) {
 		{
 			name:     "NilInput",
 			nodeName: "nil_test",
-			fn: func(ctx agent.InvocationContext, input Input) (map[string]any, error) {
+			fn: func(ctx agent.Context, input Input) (map[string]any, error) {
 				if input.Value == "" {
 					return map[string]any{"result": "zero"}, nil
 				}
@@ -82,7 +82,7 @@ func TestNewFunctionNodeWithSchema(t *testing.T) {
 		{
 			name:     "ValidationError",
 			nodeName: "test",
-			fn: func(ctx agent.InvocationContext, input Input) (map[string]any, error) {
+			fn: func(ctx agent.Context, input Input) (map[string]any, error) {
 				return map[string]any{"result": "not-an-int"}, nil
 			},
 			inputSchema:  mustSchema[Input](t),
@@ -101,7 +101,8 @@ func TestNewFunctionNodeWithSchema(t *testing.T) {
 			}
 
 			mockCtx := &MockInvocationContext{sess: nil}
-			events := node.Run(mockCtx, tc.input)
+			exCtx := agent.NewNodeContext(mockCtx, nil)
+			events := node.Run(exCtx, tc.input)
 
 			count := 0
 			for ev, err := range events {
@@ -141,7 +142,7 @@ func mustSchema[T any](t *testing.T) *jsonschema.Schema {
 }
 
 func TestFunctionNodeDirectEventPropagation(t *testing.T) {
-	fn := func(ctx agent.InvocationContext, input string) (*session.Event, error) {
+	fn := func(ctx agent.Context, input string) (*session.Event, error) {
 		ev := session.NewEvent(ctx.InvocationID())
 		ev.Output = input + " processed"
 		ev.Routes = []string{"CUSTOM_ROUTE"}
@@ -150,8 +151,9 @@ func TestFunctionNodeDirectEventPropagation(t *testing.T) {
 
 	node := NewFunctionNode[string, *session.Event]("event_proc", fn, defaultNodeConfig)
 	mockCtx := &MockInvocationContext{sess: nil}
+	exCtx := agent.NewNodeContext(mockCtx, nil)
 
-	events := node.Run(mockCtx, "hello")
+	events := node.Run(exCtx, "hello")
 
 	var yieldedEvents []*session.Event
 	for ev, err := range events {
@@ -309,8 +311,9 @@ func TestNewFunctionNodeFromState(t *testing.T) {
 				state: &mockStateForTest{data: tc.stateData},
 			}
 			mockCtx := &MockInvocationContext{sess: mockSess}
+			exCtx := agent.NewNodeContext(mockCtx, nil)
 
-			events := node.Run(mockCtx, tc.input)
+			events := node.Run(exCtx, tc.input)
 
 			var lastErr error
 			var output any
@@ -393,7 +396,7 @@ func TestEmittingFunctionNode_HitlPausesAndForwardsRequest(t *testing.T) {
 		}
 		return nil, ErrNodeInterrupted
 	}, defaultNodeConfig)
-	downstream := newHitlNode("downstream", func(_ agent.InvocationContext, _ any, _ func(*session.Event, error) bool) {
+	downstream := newHitlNode("downstream", func(_ agent.Context, _ any, _ func(*session.Event, error) bool) {
 		downstreamRan.Store(true)
 	})
 
@@ -511,7 +514,7 @@ func TestEmittingFunctionNode_EmitProgressBeforeOutput(t *testing.T) {
 		}
 		return "done", nil
 	}, defaultNodeConfig)
-	downstream := newHitlNode("downstream", func(_ agent.InvocationContext, _ any, _ func(*session.Event, error) bool) {
+	downstream := newHitlNode("downstream", func(_ agent.Context, _ any, _ func(*session.Event, error) bool) {
 		downstreamRan.Store(true)
 	})
 

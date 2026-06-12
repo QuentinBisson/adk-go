@@ -47,7 +47,7 @@ type EmittingFunctionFn[IN, OUT any] = func(
 // Exactly one of fn or emittingFn is set per node.
 type FunctionNode struct {
 	BaseNode
-	fn              func(ctx agent.InvocationContext, input any) (any, error)
+	fn              func(ctx agent.Context, input any) (any, error)
 	emittingFn      func(ctx NodeContext, input any, emit func(*session.Event) error) (any, error)
 	stateFieldNames []string
 }
@@ -58,12 +58,12 @@ func (n *FunctionNode) StateFieldNames() []string {
 }
 
 // NewFunctionNode creates a new node wrapping a custom function using generics to automatically infer input and output types.
-func NewFunctionNode[IN, OUT any](name string, fn func(ctx agent.InvocationContext, input IN) (OUT, error), cfg NodeConfig) *FunctionNode {
+func NewFunctionNode[IN, OUT any](name string, fn func(ctx agent.Context, input IN) (OUT, error), cfg NodeConfig) *FunctionNode {
 	return newFunctionNodeWithResolvedSchemas[IN, OUT](name, fn, nil, nil, cfg)
 }
 
 // NewFunctionNodeWithSchema creates a new node wrapping a custom function using generics to automatically infer input and output types.
-func NewFunctionNodeWithSchema[IN, OUT any](name string, fn func(ctx agent.InvocationContext, input IN) (OUT, error), inputSchema, outputSchema *jsonschema.Schema, cfg NodeConfig) (*FunctionNode, error) {
+func NewFunctionNodeWithSchema[IN, OUT any](name string, fn func(ctx agent.Context, input IN) (OUT, error), inputSchema, outputSchema *jsonschema.Schema, cfg NodeConfig) (*FunctionNode, error) {
 	var ischema *jsonschema.Resolved
 	var err error
 	if inputSchema != nil {
@@ -196,7 +196,7 @@ func NewFunctionNodeFromState[Params, OUT any](
 		return nil, fmt.Errorf("resolving output schema: %w", err)
 	}
 
-	wrappedFn := func(ctx agent.InvocationContext, input any) (any, error) {
+	wrappedFn := func(ctx agent.Context, input any) (any, error) {
 		sessionState := ctx.Session().State()
 		stateMap := make(map[string]any)
 
@@ -246,8 +246,8 @@ func NewFunctionNodeFromState[Params, OUT any](
 }
 
 // newFunctionNodeWithResolvedSchemas is an internal constructor that consumes already resolved schemas.
-func newFunctionNodeWithResolvedSchemas[IN, OUT any](name string, fn func(ctx agent.InvocationContext, input IN) (OUT, error), inputSchema, outputSchema *jsonschema.Resolved, cfg NodeConfig) *FunctionNode {
-	wrappedFn := func(ctx agent.InvocationContext, input any) (any, error) {
+func newFunctionNodeWithResolvedSchemas[IN, OUT any](name string, fn func(ctx agent.Context, input IN) (OUT, error), inputSchema, outputSchema *jsonschema.Resolved, cfg NodeConfig) *FunctionNode {
+	wrappedFn := func(ctx agent.Context, input any) (any, error) {
 		var output OUT
 		var err error
 		if input == nil {
@@ -322,7 +322,7 @@ func newEmittingFunctionNodeWithResolvedSchemas[IN, OUT any](name string, fn Emi
 }
 
 // Run executes the function node with the given input and returns an iterator over events.
-func (n *FunctionNode) Run(ctx agent.InvocationContext, input any) iter.Seq2[*session.Event, error] {
+func (n *FunctionNode) Run(ctx agent.Context, input any) iter.Seq2[*session.Event, error] {
 	return func(yield func(*session.Event, error) bool) {
 		if n.emittingFn != nil {
 			n.runEmitting(ctx, input, yield)
@@ -360,14 +360,9 @@ func (n *FunctionNode) Run(ctx agent.InvocationContext, input any) iter.Seq2[*se
 // dynamicNode.Run: ErrNodeInterrupted swallows the result (the pause
 // event was already emitted), any other error fails the node, and a
 // nil output suppresses the terminal event.
-func (n *FunctionNode) runEmitting(ctx agent.InvocationContext, input any, yield func(*session.Event, error) bool) {
-	nodeCtx, ok := ctx.(NodeContext)
-	if !ok {
-		yield(nil, fmt.Errorf("function node %q: scheduler did not supply a NodeContext", n.Name()))
-		return
-	}
-	emit := makeEmit(yield, nodeCtx)
-	output, err := n.emittingFn(nodeCtx, input, emit)
+func (n *FunctionNode) runEmitting(ctx agent.Context, input any, yield func(*session.Event, error) bool) {
+	emit := makeEmit(yield, ctx)
+	output, err := n.emittingFn(ctx, input, emit)
 	if err != nil {
 		if errors.Is(err, ErrNodeInterrupted) {
 			return

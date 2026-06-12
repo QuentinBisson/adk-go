@@ -65,7 +65,7 @@ func main() {
 	// greeting. The classic NewFunctionNode is enough — no events
 	// to emit beyond the terminal output.
 	greet := workflow.NewFunctionNode("greet",
-		func(_ agent.InvocationContext, name string) (string, error) {
+		func(_ agent.Context, name string) (string, error) {
 			if name == "" {
 				name = "stranger"
 			}

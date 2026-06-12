@@ -71,22 +71,22 @@ func routeByClassification(nc workflow.NodeContext, input any, emit func(*sessio
 	return nil, nil
 }
 
-func answerQuestion(ctx agent.InvocationContext, _ any) (string, error) {
+func answerQuestion(ctx agent.Context, _ any) (string, error) {
 	return "answering question: " + userMessage(ctx), nil
 }
 
-func commentOnStatement(ctx agent.InvocationContext, _ any) (string, error) {
+func commentOnStatement(ctx agent.Context, _ any) (string, error) {
 	return "commenting on statement: " + userMessage(ctx), nil
 }
 
-func reactToExclamation(ctx agent.InvocationContext, _ any) (string, error) {
+func reactToExclamation(ctx agent.Context, _ any) (string, error) {
 	return "reacting to exclamation: " + userMessage(ctx), nil
 }
 
 // userMessage reads the original user text from ctx.UserContent.
 // Handlers read it here rather than as graph input, since the
 // route node forwards only the one-word classification.
-func userMessage(ctx agent.InvocationContext) string {
+func userMessage(ctx agent.Context) string {
 	uc := ctx.UserContent()
 	if uc == nil {
 		return ""
