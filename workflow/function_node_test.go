@@ -386,7 +386,7 @@ func TestEmittingFunctionNode_HitlPausesAndForwardsRequest(t *testing.T) {
 	mockCtx := newSeededMockCtx(t)
 
 	var downstreamRan atomic.Bool
-	asker := NewEmittingFunctionNode("asker", func(ctx NodeContext, _ any, emit func(*session.Event) error) (any, error) {
+	asker := NewEmittingFunctionNode("asker", func(ctx agent.Context, _ any, emit func(*session.Event) error) (any, error) {
 		if err := emit(NewRequestInputEvent(ctx, session.RequestInput{
 			InterruptID: "human_review",
 			Message:     "Please approve",
@@ -430,7 +430,7 @@ func TestEmittingFunctionNode_HitlPausesAndForwardsRequest(t *testing.T) {
 func TestEmittingFunctionNode_AutoGeneratesInterruptID(t *testing.T) {
 	mockCtx := newSeededMockCtx(t)
 
-	asker := NewEmittingFunctionNode("asker", func(ctx NodeContext, _ any, emit func(*session.Event) error) (any, error) {
+	asker := NewEmittingFunctionNode("asker", func(ctx agent.Context, _ any, emit func(*session.Event) error) (any, error) {
 		if err := emit(NewRequestInputEvent(ctx, session.RequestInput{Message: "approve?"})); err != nil {
 			return nil, err
 		}
@@ -453,7 +453,7 @@ func TestEmittingFunctionNode_AutoGeneratesInterruptID(t *testing.T) {
 func TestEmittingFunctionNode_MultipleRequestsPark(t *testing.T) {
 	mockCtx := newSeededMockCtx(t)
 
-	asker := NewEmittingFunctionNode("asker", func(ctx NodeContext, _ any, emit func(*session.Event) error) (any, error) {
+	asker := NewEmittingFunctionNode("asker", func(ctx agent.Context, _ any, emit func(*session.Event) error) (any, error) {
 		if err := emit(NewRequestInputEvent(ctx, session.RequestInput{InterruptID: "first"})); err != nil {
 			return nil, err
 		}
@@ -484,7 +484,7 @@ func TestEmittingFunctionNode_ErrorAfterRequestFails(t *testing.T) {
 	mockCtx := newSeededMockCtx(t)
 
 	wantErr := errors.New("downstream of request")
-	asker := NewEmittingFunctionNode("asker", func(ctx NodeContext, _ any, emit func(*session.Event) error) (any, error) {
+	asker := NewEmittingFunctionNode("asker", func(ctx agent.Context, _ any, emit func(*session.Event) error) (any, error) {
 		if err := emit(NewRequestInputEvent(ctx, session.RequestInput{InterruptID: "ignored"})); err != nil {
 			return nil, err
 		}
@@ -506,7 +506,7 @@ func TestEmittingFunctionNode_EmitProgressBeforeOutput(t *testing.T) {
 	mockCtx := newSeededMockCtx(t)
 
 	var downstreamRan atomic.Bool
-	worker := NewEmittingFunctionNode("worker", func(ctx NodeContext, _ any, emit func(*session.Event) error) (string, error) {
+	worker := NewEmittingFunctionNode("worker", func(ctx agent.Context, _ any, emit func(*session.Event) error) (string, error) {
 		progress := session.NewEvent(ctx.InvocationID())
 		progress.Content = &genai.Content{Parts: []*genai.Part{{Text: "tick"}}}
 		if err := emit(progress); err != nil {

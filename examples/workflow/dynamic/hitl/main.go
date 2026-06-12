@@ -51,7 +51,7 @@ func main() {
 	ctx := context.Background()
 
 	ask := workflow.NewEmittingFunctionNode[any, any]("ask_name",
-		func(nc workflow.NodeContext, _ any, emit func(*session.Event) error) (any, error) {
+		func(nc agent.Context, _ any, emit func(*session.Event) error) (any, error) {
 			if err := emit(workflow.NewRequestInputEvent(nc, session.RequestInput{
 				InterruptID: "ask_name",
 				Message:     "What's your name?",

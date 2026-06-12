@@ -39,7 +39,7 @@ import (
 // (zero, ErrNodeInterrupted); the engine parks the node and routes the
 // resume payload per NodeConfig.RerunOnResume.
 type EmittingFunctionFn[IN, OUT any] = func(
-	ctx NodeContext, input IN, emit func(*session.Event) error,
+	ctx agent.Context, input IN, emit func(*session.Event) error,
 ) (OUT, error)
 
 // FunctionNode wraps a custom function.
@@ -48,7 +48,7 @@ type EmittingFunctionFn[IN, OUT any] = func(
 type FunctionNode struct {
 	BaseNode
 	fn              func(ctx agent.Context, input any) (any, error)
-	emittingFn      func(ctx NodeContext, input any, emit func(*session.Event) error) (any, error)
+	emittingFn      func(ctx agent.Context, input any, emit func(*session.Event) error) (any, error)
 	stateFieldNames []string
 }
 
@@ -289,7 +289,7 @@ func newFunctionNodeWithResolvedSchemas[IN, OUT any](name string, fn func(ctx ag
 // newEmittingFunctionNodeWithResolvedSchemas is the internal
 // constructor for the streaming variant.
 func newEmittingFunctionNodeWithResolvedSchemas[IN, OUT any](name string, fn EmittingFunctionFn[IN, OUT], inputSchema, outputSchema *jsonschema.Resolved, cfg NodeConfig) *FunctionNode {
-	wrappedFn := func(ctx NodeContext, input any, emit func(*session.Event) error) (any, error) {
+	wrappedFn := func(ctx agent.Context, input any, emit func(*session.Event) error) (any, error) {
 		var typedInput IN
 		if input != nil {
 			t, ok := input.(IN)

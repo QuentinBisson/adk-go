@@ -45,7 +45,7 @@ func rollDie(_ agent.Context, _ string) (int, error) {
 // emitting FunctionNode can do; returning nil suppresses the default
 // terminal event so this single emit carries both the route and the
 // output.
-func routeByValue(nc workflow.NodeContext, value int, emit func(*session.Event) error) (any, error) {
+func routeByValue(nc agent.Context, value int, emit func(*session.Event) error) (any, error) {
 	ev := session.NewEvent(nc.InvocationID())
 	// IntRoute and MultiRoute[int] both compare against the
 	// stringified value, so emit it that way.
