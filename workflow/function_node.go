@@ -305,7 +305,7 @@ func newEmittingFunctionNodeWithResolvedSchemas[IN, OUT any](name string, fn Emi
 
 		output, err := fn(ctx, typedInput, emit)
 		if err != nil {
-			return output, err
+			return nil, err
 		}
 		if outputSchema != nil {
 			if validateErr := typeutil.ValidateWithJSONSchema(output, outputSchema); validateErr != nil {
