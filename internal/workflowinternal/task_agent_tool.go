@@ -48,11 +48,18 @@ func (t *TaskAgentTool) Declaration() *genai.FunctionDeclaration {
 	return t.funcDeclaration
 }
 
-func (t *TaskAgentTool) Run(toolCtx agent.ToolContext, args any) (map[string]any, error) {
-	// Framework handles task delegation dispatch directly via the wrapper.
-	// TODO: add _defer_response logic.
-	// TODO: dispatch via RunNode with WithIsolationScope(fcID) and WithRunID(fcID).
+func (t *TaskAgentTool) Run(toolCtx agent.Context, args any) (map[string]any, error) {
+	// Framework handles task delegation dispatch directly via the
+	// LlmAgent chat wrapper.
 	return nil, nil
+}
+
+// DefersResponse implements toolinternal.ResponseDeferrer: the
+// FunctionResponse for a task delegation is produced by the chat
+// wrapper (synthesizeTaskFREvent), not by the standard tool-execution
+// pipeline.
+func (t *TaskAgentTool) DefersResponse() bool {
+	return true
 }
 
 func (t *TaskAgentTool) Name() string {
@@ -67,7 +74,7 @@ func (t *TaskAgentTool) IsLongRunning() bool {
 	return false
 }
 
-func (t *TaskAgentTool) ProcessRequest(ctx agent.ToolContext, req *model.LLMRequest) error {
+func (t *TaskAgentTool) ProcessRequest(ctx agent.Context, req *model.LLMRequest) error {
 	return toolutils.PackTool(req, t)
 }
 
