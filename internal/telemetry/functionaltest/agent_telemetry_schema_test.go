@@ -75,6 +75,7 @@ func TestTelemetrySchema_AgentWithTool(t *testing.T) {
 			} else {
 				t.Setenv(captureMessageContentEnvVar, "")
 			}
+			telemetry.ApplyEnv()
 
 			// Install in-memory tracer + logger so the test sees
 			// every span/log without depending on global OTel state.
@@ -129,7 +130,7 @@ func newAgentWithToolScenario(t *testing.T) agent.Agent {
 	sampleTool, err := functiontool.New(functiontool.Config{
 		Name:        "some_tool",
 		Description: "A sample tool.",
-	}, func(_ agent.ToolContext, in Args) (string, error) {
+	}, func(_ agent.Context, in Args) (string, error) {
 		return "processed " + in.Arg1, nil
 	})
 	if err != nil {
