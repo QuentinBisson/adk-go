@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"sync"
 
 	"github.com/google/jsonschema-go/jsonschema"
 
@@ -104,7 +105,11 @@ func (n *dynamicNode[IN, OUT]) Run(ctx agent.Context, input any) iter.Seq2[*sess
 			return
 		}
 
-		emit := makeEmit(yield, ctx)
+		// One mutex serializes every yield for this activation: the emit
+		// passed to the DynamicFn and the same emit driven by RunNode via
+		// the sub-scheduler. Concurrent children must not yield at once.
+		var emitMu sync.Mutex
+		emit := makeEmit(yield, ctx, &emitMu)
 		sub := newDynamicSubScheduler(ctx, n.composePath(ctx), emit)
 		orchestratorCtx := newDynamicNodeContext(ctx, sub.ParentPath(), "", sub, sub.OutputForAncestors())
 
@@ -186,8 +191,15 @@ func (n *dynamicNode[IN, OUT]) composePath(parent NodeContext) string {
 // When yield returns false without ctx cancellation (no current
 // consumer triggers this, but the contract must not depend on it),
 // return context.Canceled as a stand-in.
-func makeEmit(yield func(*session.Event, error) bool, parentCtx NodeContext) func(*session.Event) error {
+//
+// mu serializes yield: a DynamicFn may run concurrent children (see
+// WithUseSubBranch) that all emit through this one callback, and calling
+// the same yield from multiple goroutines panics the iterator and races
+// the parent runNode's completion accumulator.
+func makeEmit(yield func(*session.Event, error) bool, parentCtx NodeContext, mu *sync.Mutex) func(*session.Event) error {
 	return func(ev *session.Event) error {
+		mu.Lock()
+		defer mu.Unlock()
 		if err := parentCtx.Err(); err != nil {
 			return err
 		}
