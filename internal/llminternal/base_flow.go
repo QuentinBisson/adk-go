@@ -1302,23 +1302,29 @@ func mergeParallelFunctionResponseEvents(events []*session.Event) (*session.Even
 	}
 	var parts []*genai.Part
 	var actions *session.EventActions
+	var base *session.Event
 	for _, ev := range events {
 		if ev == nil || ev.LLMResponse.Content == nil {
 			continue
 		}
+		if base == nil {
+			base = ev
+		}
 		parts = append(parts, ev.LLMResponse.Content.Parts...)
 		actions = mergeEventActions(actions, &ev.Actions)
 	}
-	// reuse events[0]
-	ev := events[0]
-	ev.LLMResponse = model.LLMResponse{
+	// All entries were nil (e.g. every call was long-running/deferred).
+	if base == nil {
+		return nil, nil
+	}
+	base.LLMResponse = model.LLMResponse{
 		Content: &genai.Content{
 			Role:  "user",
 			Parts: parts,
 		},
 	}
-	ev.Actions = *actions
-	return ev, nil
+	base.Actions = *actions
+	return base, nil
 }
 
 func mergeEventActions(base, other *session.EventActions) *session.EventActions {
