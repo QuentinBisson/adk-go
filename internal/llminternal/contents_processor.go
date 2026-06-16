@@ -73,7 +73,8 @@ func buildContentsDefault(agentName, invocationBranch string, events []*session.
 		// Skip events without content or generated neither by user nor
 		// by model, UNLESS they have transcriptions.
 		if (content == nil || content.Role == "" || len(content.Parts) == 0) &&
-			ev.LLMResponse.InputTranscription == nil && ev.LLMResponse.OutputTranscription == nil {
+			ev.LLMResponse.InputTranscription == nil && ev.LLMResponse.OutputTranscription == nil &&
+			ev.Actions.Compaction == nil {
 			// TODO: log a bad event with content but no Role is skipped
 			// Note: python checks here if content.Parts[0] is an empty string and skip if so.
 			// But unlike python that distinguishes None vs empty string, two cases are indistinguishable in Go.
@@ -598,54 +599,128 @@ func shouldExcludeEvent(ev *session.Event) bool {
 // with the compaction's summary content. Compaction marker events are always
 // removed from the output.
 //
-// A compaction C is subsumed when another compaction C2 fully covers its range
-// (C2.start <= C.start && C2.end >= C.end). Subsumed compactions are hidden so
-// only the widest covering summary is injected.
+// A compaction C is subsumed when another compaction C2 strictly and uniquely
+// covers its range (C2.start <= C.start && C2.end >= C.end && C2 != C). When
+// two markers share identical [start, end] timestamps neither is treated as
+// subsumed — both are kept and de-duplicated by choosing the first one
+// encountered after sorting.
+//
+// Function-call events whose paired function-response falls outside every
+// active range are pinned and kept in the output unconditionally, preventing
+// rearrangeEventsForLatestFunctionResponse from seeing an orphaned response.
 func applyCompaction(agentName string, events []*session.Event) []*session.Event {
 	type compRange struct {
 		startTS, endTS time.Time
 		content        *genai.Content
-		ev             *session.Event
 	}
 
 	var ranges []compRange
 	for _, ev := range events {
 		if ev.Actions.Compaction != nil {
 			c := ev.Actions.Compaction
-			ranges = append(ranges, compRange{c.StartTimestamp, c.EndTimestamp, c.CompactedContent, ev})
+			ranges = append(ranges, compRange{c.StartTimestamp, c.EndTimestamp, c.CompactedContent})
 		}
 	}
 	if len(ranges) == 0 {
 		return events
 	}
 
-	// Remove subsumed compactions.
+	// Sort by start so that identical ranges are adjacent and subsumed-check is
+	// well-defined without O(n²) all-pairs scanning.
+	slices.SortFunc(ranges, func(a, b compRange) int {
+		if a.startTS.Before(b.startTS) {
+			return -1
+		}
+		if a.startTS.After(b.startTS) {
+			return 1
+		}
+		return 0
+	})
+
+	// Remove subsumed compactions. A range at index i is subsumed when a
+	// different range j fully covers it (j.start <= i.start && j.end >= i.end).
+	// Identical ranges are NOT treated as subsumed by each other; only one copy
+	// survives (the first after sorting).
+	seen := make(map[[2]int64]bool) // key: [startUnixNano, endUnixNano]
 	active := make([]compRange, 0, len(ranges))
-	for _, r := range ranges {
+	for i, r := range ranges {
+		key := [2]int64{r.startTS.UnixNano(), r.endTS.UnixNano()}
+		if seen[key] {
+			continue // duplicate of an already-kept identical range
+		}
 		subsumed := false
-		for _, r2 := range ranges {
-			if r2.ev == r.ev {
+		for j, r2 := range ranges {
+			if i == j {
 				continue
 			}
-			if !r2.startTS.After(r.startTS) && !r2.endTS.Before(r.endTS) {
+			// r2 strictly covers r (not merely identical — identical pairs are
+			// handled by the seen-map above).
+			if !r2.startTS.After(r.startTS) && !r2.endTS.Before(r.endTS) &&
+				(r2.startTS != r.startTS || r2.endTS != r.endTS) {
 				subsumed = true
 				break
 			}
 		}
 		if !subsumed {
+			seen[key] = true
 			active = append(active, r)
 		}
 	}
 
-	sort.Slice(active, func(i, j int) bool {
-		return active[i].startTS.Before(active[j].startTS)
-	})
+	// Ranges with nil content cannot inject a summary; exclude them so their
+	// original events are preserved rather than silently dropped.
+	active = slices.DeleteFunc(active, func(r compRange) bool { return r.content == nil })
+	if len(active) == 0 {
+		return events
+	}
 
-	injected := make([]bool, len(active))
+	// active is already sorted by startTS from the earlier sort.
+
+	// inAnyRange reports whether ts falls within any active compaction range.
+	inAnyRange := func(ts time.Time) bool {
+		for _, r := range active {
+			if !ts.Before(r.startTS) && !ts.After(r.endTS) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Pin function-call events whose paired response falls outside every active
+	// range. Removing such a call would orphan the response and cause
+	// rearrangeEventsForLatestFunctionResponse to error.
+	respIDsOutside := make(map[string]bool)
+	for _, ev := range events {
+		if ev.Actions.Compaction != nil || inAnyRange(ev.Timestamp) {
+			continue
+		}
+		for _, fr := range utils.FunctionResponses(utils.Content(ev)) {
+			respIDsOutside[fr.ID] = true
+		}
+	}
+	pinned := make(map[*session.Event]bool)
+	for _, ev := range events {
+		if ev.Actions.Compaction != nil || !inAnyRange(ev.Timestamp) {
+			continue
+		}
+		for _, fc := range utils.FunctionCalls(utils.Content(ev)) {
+			if respIDsOutside[fc.ID] {
+				pinned[ev] = true
+			}
+		}
+	}
+
+	// Walk events: drop markers, inject summaries, preserve events outside ranges
+	// and pinned function-call events. When content is nil for a range, keep the
+	// original events rather than silently dropping them.
+	injected := make(map[int]bool, len(active))
 	result := make([]*session.Event, 0, len(events))
 	for _, ev := range events {
-		// Compaction marker events are never emitted.
 		if ev.Actions.Compaction != nil {
+			continue
+		}
+		if pinned[ev] {
+			result = append(result, ev)
 			continue
 		}
 		inRange := -1
@@ -656,7 +731,7 @@ func applyCompaction(agentName string, events []*session.Event) []*session.Event
 			}
 		}
 		if inRange >= 0 {
-			if !injected[inRange] && active[inRange].content != nil {
+			if !injected[inRange] {
 				summaryEv := &session.Event{
 					Timestamp:   active[inRange].startTS,
 					Author:      agentName,
