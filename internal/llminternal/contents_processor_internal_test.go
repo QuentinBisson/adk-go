@@ -15,6 +15,7 @@
 package llminternal
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -80,7 +81,7 @@ func TestDropOrphanedFunctionCalls(t *testing.T) {
 	output := captureLog(t, func() {
 		got := dropOrphanedFunctionCalls(events)
 		if diff := cmp.Diff(want, got); diff != "" {
-			t.Errorf("pruned events mismatch (-want +got):\n%s", diff)
+			t.Fatalf("pruned events mismatch (-want +got):\n%s", diff)
 		}
 		for i, ev := range got {
 			if ev == parallel {
@@ -102,11 +103,13 @@ func TestDropOrphanedFunctionCalls(t *testing.T) {
 func TestDropOrphanedFunctionCalls_NothingToDrop(t *testing.T) {
 	events := []*session.Event{
 		{LLMResponse: model.LLMResponse{Content: genai.NewContentFromFunctionCall("tool", nil, "model")}},
+		{LLMResponse: model.LLMResponse{Content: &genai.Content{Role: "model", Parts: []*genai.Part{{FunctionCall: &genai.FunctionCall{ID: "answered", Name: "tool"}}}}}},
+		{LLMResponse: model.LLMResponse{Content: &genai.Content{Role: "user", Parts: []*genai.Part{{FunctionResponse: &genai.FunctionResponse{ID: "answered", Name: "tool"}}}}}},
 		{LLMResponse: model.LLMResponse{Content: genai.NewContentFromText("hello", "user")}},
 	}
 	output := captureLog(t, func() {
 		got := dropOrphanedFunctionCalls(events)
-		if len(got) != len(events) || got[0] != events[0] || got[1] != events[1] {
+		if !slices.Equal(got, events) {
 			t.Error("dropOrphanedFunctionCalls changed a history with no orphaned call; want the input events returned unchanged")
 		}
 	})
